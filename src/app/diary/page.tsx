@@ -1,92 +1,127 @@
 // src/app/diary/page.tsx
 "use client";
 import { useEffect, useState, useCallback } from "react";
-import type { User, Post } from "@/types";
+import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
+import type { PostWithURL, User } from "@/types";
+import ImageInput from "./components/ImageInput";
+
+/* ---------- helpers ---------- */
+const getSignedUrl = async (key: string) => {
+  const { data, error } = await supabase.storage
+    .from("images")
+    .createSignedUrl(key, 60 * 60); // 1 h
+  if (error) throw error;
+  return data.signedUrl;
+};
 
 export default function DiaryPage() {
-  /* ---------- State ---------- */
   const [user, setUser] = useState<User | null>(null);
   const [content, setContent] = useState("");
-  const [posts, setPosts] = useState<Post[]>([]);
+  const [file, setFile] = useState<File | null>(null);
+  const [posts, setPosts] = useState<PostWithURL[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  /* ---------- Auth check ---------- */
+  /* ---------- auth ---------- */
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) {
-        window.location.href = "/login";
-      } else {
-        setUser({ id: user.id, email: user.email ?? null });
-        fetchPosts();
-      }
-    });
+    supabase.auth.getUser().then(({ data }) => setUser(data.user as User));
   }, []);
-  /* ---------- Fetch posts ---------- */
-  const fetchPosts = useCallback(async () => {
-    const { data } = (await supabase
+
+  /* ---------- fetch posts ---------- */
+  const loadPosts = useCallback(async () => {
+    if (!user) return;
+    const { data, error } = await supabase
       .from("posts")
       .select("*")
-      .order("created_at", { ascending: false })
-      .throwOnError()) as { data: Post[] | null };
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+    if (error) return console.error(error);
+    const withURL: PostWithURL[] = await Promise.all(
+      data.map(async (p) => ({
+        ...p,
+        image_url: p.image_path ? await getSignedUrl(p.image_path) : null,
+      }))
+    );
+    setPosts(withURL);
+  }, [user]);
 
-    setPosts(data || []);
-  }, []);
+  useEffect(() => {
+    loadPosts();
+  }, [loadPosts]);
 
-  /* ---------- Handle post ---------- */
-  const handlePost = async () => {
-    if (!content) return;
+  /* ---------- submit ---------- */
+  const handleSubmit = async () => {
+    if (!user) return;
+    setLoading(true);
+    let key: string | null = null;
 
-    await supabase.from("posts").insert([{ content, user_id: user!.id }]);
-    setContent("");
-    fetchPosts();
+    try {
+      // upload if file exists
+      if (file) {
+        const ext = file.name.split(".").pop() ?? "jpg";
+        key = `images/${user.id}/${Date.now()}.${ext}`;
+        const { error } = await supabase.storage
+          .from("images")
+          .upload(key, file, {
+            // upsert false = enforce unique
+            contentType: file.type,
+          });
+        if (error) throw error;
+      }
+
+      // insert post
+      const { error: insertErr } = await supabase.from("posts").insert({
+        user_id: user.id,
+        content,
+        image_path: key,
+      });
+      if (insertErr) throw insertErr;
+
+      setContent("");
+      setFile(null);
+      await loadPosts();
+    } catch (e) {
+      console.error(e);
+      alert("Failed, please retry.");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  /* ---------- UI ---------- */
   return (
-    <div className="max-w-2xl mx-auto p-6 space-y-6">
-      {/* ← ★ 追記 */}
-      <h2 className="text-xl font-bold border-b pb-2">ようこそ</h2>
+    <main className="max-w-xl mx-auto p-4 space-y-4">
+      <textarea
+        value={content}
+        onChange={(e) => setContent(e.target.value)}
+        placeholder="What's up?"
+        className="w-full border rounded p-2"
+      />
+      <ImageInput file={file} setFile={setFile} />
+      <button
+        onClick={handleSubmit}
+        disabled={loading}
+        className="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
+      >
+        {loading ? "Posting..." : "Post"}
+      </button>
 
-      {/* 投稿フォーム */}
-      <div className="space-y-4">
-        {/* ← ★ 追記 */}
-        <textarea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder="今日の出来事を書いてみよう"
-          className="w-full min-h-[120px] rounded-lg border border-gray-300
-                     p-3 focus:border-indigo-500 focus:ring-indigo-500" /* ★ */
-        />
-
-        <button
-          onClick={handlePost}
-          disabled={!content}
-          className="inline-flex items-center gap-2 rounded-lg bg-indigo-600
-                     px-4 py-2 font-medium text-white hover:bg-indigo-700
-                     disabled:opacity-40" /* ★ */
-        >
-          投稿
-        </button>
-      </div>
-
-      {/* 投稿一覧 */}
-      <ul className="space-y-6">
-        {/* ← ★ 追記 */}
+      <section className="space-y-6 pt-6">
         {posts.map((p) => (
-          <li
-            key={p.id}
-            className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm" /* ★ */
-          >
-            <p className="whitespace-pre-wrap">{p.content}</p>
-
-            {/* 画像部分（<Image>）は要件により除外 */}
-
-            <p className="mt-2 text-xs text-gray-500">
-              {new Date(p.created_at).toLocaleString()}
-            </p>
-          </li>
+          <article key={p.id} className="border rounded p-4 space-y-2">
+            <p>{p.content}</p>
+            {p.image_url && (
+              <Image
+                src={p.image_url}
+                alt="post image"
+                width={400}
+                height={400}
+                className="rounded"
+              />
+            )}
+            <p className="text-xs text-gray-500">{p.created_at}</p>
+          </article>
         ))}
-      </ul>
-    </div>
+      </section>
+    </main>
   );
 }
