@@ -3,14 +3,13 @@
 import { useState, DragEvent } from "react";
 
 interface Props {
-  file: File | null;
   setFile: (f: File | null) => void;
 }
 
 const MAX_MB = 5;
 const okTypes = ["image/jpeg", "image/png", "image/webp"];
 
-export default function ImageInput({ file: _file, setFile }: Props) {
+export default function ImageInput({ setFile }: Props) {
   const [preview, setPreview] = useState<string | null>(null);
 
   const handleFile = (f: File) => {

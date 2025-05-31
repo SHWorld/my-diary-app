@@ -96,7 +96,7 @@ export default function DiaryPage() {
         placeholder="What's up?"
         className="w-full border rounded p-2"
       />
-      <ImageInput file={file} setFile={setFile} />
+      <ImageInput setFile={setFile} />
       <button
         onClick={handleSubmit}
         disabled={loading}
