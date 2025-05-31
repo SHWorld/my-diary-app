@@ -10,7 +10,7 @@ interface Props {
 const MAX_MB = 5;
 const okTypes = ["image/jpeg", "image/png", "image/webp"];
 
-export default function ImageInput({ file, setFile }: Props) {
+export default function ImageInput({ file: _file, setFile }: Props) {
   const [preview, setPreview] = useState<string | null>(null);
 
   const handleFile = (f: File) => {
