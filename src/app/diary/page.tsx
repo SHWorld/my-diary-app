@@ -115,6 +115,7 @@ export default function DiaryPage() {
                 alt="post image"
                 width={400}
                 height={400}
+                unoptimized
                 className="rounded"
               />
             )}
