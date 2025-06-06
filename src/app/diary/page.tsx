@@ -1,17 +1,18 @@
 // src/app/diary/page.tsx
 "use client";
 import { useEffect, useState, useCallback } from "react";
-import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import type { PostWithURL, User } from "@/types";
 import ImageInput from "./components/ImageInput";
+import PostCard from "./components/PostCard";
+import LogoutButton from "./components/LogoutButton";
 
-/* ---------- helpers ---------- */
+/* ---------- helper: signed URL ---------- */
 const getSignedUrl = async (key: string) => {
   const { data, error } = await supabase.storage
     .from("images")
     .createSignedUrl(key, 60 * 60); // 1 h
-  if (error) throw error;
+  if (error || !data.signedUrl) return null;
   return data.signedUrl;
 };
 
@@ -27,7 +28,7 @@ export default function DiaryPage() {
     supabase.auth.getUser().then(({ data }) => setUser(data.user as User));
   }, []);
 
-  /* ---------- fetch posts ---------- */
+  /* ---------- fetch ---------- */
   const loadPosts = useCallback(async () => {
     if (!user) return;
     const { data, error } = await supabase
@@ -49,27 +50,23 @@ export default function DiaryPage() {
     loadPosts();
   }, [loadPosts]);
 
-  /* ---------- submit ---------- */
+  /* ---------- create ---------- */
   const handleSubmit = async () => {
     if (!user) return;
+    if (!content.trim()) return alert("本文が空です");
     setLoading(true);
     let key: string | null = null;
 
     try {
-      // upload if file exists
       if (file) {
         const ext = file.name.split(".").pop() ?? "jpg";
-        key = `images/${user.id}/${Date.now()}.${ext}`;
+        key = `${user.id}/${Date.now()}.${ext}`;
         const { error } = await supabase.storage
           .from("images")
-          .upload(key, file, {
-            // upsert false = enforce unique
-            contentType: file.type,
-          });
+          .upload(key, file, { contentType: file.type });
         if (error) throw error;
       }
 
-      // insert post
       const { error: insertErr } = await supabase.from("posts").insert({
         user_id: user.id,
         content,
@@ -80,47 +77,45 @@ export default function DiaryPage() {
       setContent("");
       setFile(null);
       await loadPosts();
-    } catch (e) {
-      console.error(e);
-      alert("Failed, please retry.");
     } finally {
       setLoading(false);
     }
   };
 
+  /* ---------- UI ---------- */
   return (
-    <main className="max-w-xl mx-auto p-4 space-y-4">
-      <textarea
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        placeholder="What's up?"
-        className="w-full border rounded p-2"
-      />
-      <ImageInput setFile={setFile} />
-      <button
-        onClick={handleSubmit}
-        disabled={loading}
-        className="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
-      >
-        {loading ? "Posting..." : "Post"}
-      </button>
+    <main className="mx-auto max-w-xl space-y-6 p-4">
+      <h1 className="text-2xl font-bold">My Diary</h1>
+      <LogoutButton />
 
-      <section className="space-y-6 pt-6">
+      {/* ---- 新規投稿 ---- */}
+      <section className="space-y-2 rounded border p-4">
+        <textarea
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          placeholder="What's up?"
+          className="w-full rounded border p-2"
+          rows={3}
+        />
+        <ImageInput setFile={setFile} file={file} />
+        <button
+          onClick={handleSubmit}
+          disabled={loading}
+          className="rounded bg-blue-600 px-4 py-2 text-white disabled:opacity-40"
+        >
+          {loading ? "Posting…" : "Post"}
+        </button>
+      </section>
+
+      {/* ---- 一覧 ---- */}
+      <section className="space-y-6">
         {posts.map((p) => (
-          <article key={p.id} className="border rounded p-4 space-y-2">
-            <p>{p.content}</p>
-            {p.image_url && (
-              <Image
-                src={p.image_url}
-                alt="post image"
-                width={400}
-                height={400}
-                unoptimized
-                className="rounded"
-              />
-            )}
-            <p className="text-xs text-gray-500">{p.created_at}</p>
-          </article>
+          <PostCard
+            key={p.id}
+            post={p}
+            currentUser={user!}
+            refresh={loadPosts}
+          />
         ))}
       </section>
     </main>
